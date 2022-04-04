@@ -23,7 +23,7 @@ public class SnowflakeService {
         Properties properties = PropertyFactory.getProperties();
         boolean flag = Boolean.parseBoolean(properties.getProperty(Constants.LEAF_SNOWFLAKE_ENABLE, "true"));
         if (flag) {
-            // 检查节点
+            // 获取配置文件中的zk的地址，以及snowflake监听的本机端口号
             String zkAddress = properties.getProperty(Constants.LEAF_SNOWFLAKE_ZK_ADDRESS);
             int port = Integer.parseInt(properties.getProperty(Constants.LEAF_SNOWFLAKE_PORT));
             idGen = new SnowflakeIDGenImpl(zkAddress, port);

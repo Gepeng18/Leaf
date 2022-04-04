@@ -30,7 +30,7 @@ public class SnowflakeZookeeperHolder {
     private static final Logger LOGGER = LoggerFactory.getLogger(SnowflakeZookeeperHolder.class);
     private String zk_AddressNode = null;//保存自身的key  ip:port-000000001
     private String listenAddress = null;//保存自身的key ip:port
-    private int workerID;
+    private int workerID; // 本机唯一
     private static final String PREFIX_ZK_PATH = "/snowflake/" + PropertyFactory.getProperties().getProperty("leaf.name");
     private static final String PROP_PATH = System.getProperty("java.io.tmpdir") + File.separator + PropertyFactory.getProperties().getProperty("leaf.name") + "/leafconf/{port}/workerID.properties";
     private static final String PATH_FOREVER = PREFIX_ZK_PATH + "/forever";//保存所有数据持久的节点
@@ -39,6 +39,11 @@ public class SnowflakeZookeeperHolder {
     private String connectionString;
     private long lastUpdateTime;
 
+    /**
+     * @param ip 本机的id生成器的地址
+     * @param port 本机的id生成器的端口号
+     * @param connectionString zk的地址
+     */
     public SnowflakeZookeeperHolder(String ip, String port, String connectionString) {
         this.ip = ip;
         this.port = port;
@@ -48,12 +53,13 @@ public class SnowflakeZookeeperHolder {
 
     public boolean init() {
         try {
+            // 1、连接上zk
             CuratorFramework curator = createWithOptions(connectionString, new RetryUntilElapsed(1000, 4), 10000, 6000);
             curator.start();
-            // 检查节点是否存在
+            // 2、检查zk根节点是否存在
             Stat stat = curator.checkExists().forPath(PATH_FOREVER);
             if (stat == null) {
-                // 不存在根节点,则是机器第一次启动,创建/snowflake/ip:port-000000000,并上传数据
+                // 不存在根节点,则是机器第一次启动,创建/snowflake/ip:port-000000000,并返回数据 ip:port-000000000
                 // 创建永久顺序节点
                 zk_AddressNode = createNode(curator);
                 // worker id 默认是0
@@ -63,8 +69,9 @@ public class SnowflakeZookeeperHolder {
                 ScheduledUploadData(curator, zk_AddressNode);
                 return true;
             } else {
-                Map<String, Integer> nodeMap = Maps.newHashMap();//ip:port->00001
-                Map<String, String> realNode = Maps.newHashMap();//ip:port->(ip:port-000001)
+                // 如果zk根节点存在
+                Map<String, Integer> nodeMap = Maps.newHashMap();// {ip:port -> 00001}
+                Map<String, String> realNode = Maps.newHashMap();// {ip:port -> ip:port-000001}
                 // 存在根节点,先检查是否有属于自己的根节点
                 // 127.0.0.1:1000-000000001
                 List<String> keys = curator.getChildren().forPath(PATH_FOREVER);
@@ -75,7 +82,7 @@ public class SnowflakeZookeeperHolder {
                 }
                 Integer workerid = nodeMap.get(listenAddress);
                 if (workerid != null) {
-                    // 有自己的节点,zk_AddressNode=ip:port
+                    // 有自己的节点,zk_AddressNode=ip:port-00001
                     zk_AddressNode = PATH_FOREVER + "/" + realNode.get(listenAddress);
                     // 赋值给workId, 启动worder时使用会使用
                     workerID = workerid;
@@ -88,7 +95,7 @@ public class SnowflakeZookeeperHolder {
                     updateLocalWorkerID(workerID);
                     LOGGER.info("[Old NODE]find forever node have this endpoint ip-{} port-{} workid-{} childnode and start SUCCESS", ip, port, workerID);
                 } else {
-                    //表示新启动的节点,创建持久节点 ,不用check时间
+                    // 根据ip + port 没找到数据，表示新启动的节点,创建持久节点(0000000000),不用check时间
                     String newNode = createNode(curator);
                     zk_AddressNode = newNode;
                     String[] nodeKey = newNode.split("-");
@@ -117,6 +124,11 @@ public class SnowflakeZookeeperHolder {
         ScheduledUploadData(curator, zk_AddressNode);// /snowflake_forever/ip:port-000000001
     }
 
+    /**
+     * 起一个定时任务，定期上报本机时间给forever节点
+     * 更新数据的同时，由于zk节点的特性，节点后缀，即workId + 1
+     * 同时将当前时间记录在上一次更新时间中
+     */
     private void ScheduledUploadData(final CuratorFramework curator, final String zk_AddressNode) {
         Executors.newSingleThreadScheduledExecutor(new ThreadFactory() {
             @Override
@@ -173,7 +185,7 @@ public class SnowflakeZookeeperHolder {
     }
 
     /**
-     * 构建需要上传的数据
+     * 构建需要上传的数据，其实就是上传了 ip + port + 当前时间
      *
      * @return
      */

@@ -192,14 +192,14 @@ public class SegmentIDGenImpl implements IDGen {
                 if (nextStep * 2 > MAX_STEP) {
                     //do nothing
                 } else {
-                    // 如果步长不是特别大，则乘2倍(听着就像有坑)
+                    // 如果步长不是特别大，则乘2倍
                     nextStep = nextStep * 2;
                 }
             } else if (duration < SEGMENT_DURATION * 2) {
                 // 如果小于30分钟
                 //do nothing with nextStep
             } else {
-                // 大于30分钟，缩短步长(可能锁为一半)
+                // 大于30分钟，缩短步长(可能缩为一半)
                 nextStep = nextStep / 2 >= buffer.getMinStep() ? nextStep / 2 : nextStep;
             }
             logger.info("leafKey[{}], step[{}], duration[{}mins], nextStep[{}]", key, buffer.getStep(), String.format("%.2f",((double)duration / (1000 * 60))), nextStep);
@@ -209,8 +209,8 @@ public class SegmentIDGenImpl implements IDGen {
             // 先更新数据库，再更新缓存
             leafAlloc = dao.updateMaxIdByCustomStepAndGetLeafAlloc(temp);
             buffer.setUpdateTimestamp(System.currentTimeMillis());
-            buffer.setStep(nextStep);
-            buffer.setMinStep(leafAlloc.getStep());//leafAlloc的step为DB中的step
+            buffer.setStep(nextStep); // 计算出的自适应step
+            buffer.setMinStep(leafAlloc.getStep()); // leafAlloc的step为DB中的step，数据库中的step自始至终没变过
         }
         // must set value before set max
         // 计算出来 设置step之前的值
@@ -225,12 +225,14 @@ public class SegmentIDGenImpl implements IDGen {
     }
 
     public Result getIdFromSegmentBuffer(final SegmentBuffer buffer) {
+        // 不停地取
         while (true) {
             buffer.rLock().lock();
             try {
                 // 获取segment
                 final Segment segment = buffer.getCurrent();
-                // 如果下个segment处于不可切换状态 && 这个segment剩余的 id 小于了 90%    && 线程运行状态是false
+                // 1、如果下个segment处于不可切换状态 && 这个segment剩余的 id 小于了 90%    && 线程运行状态是false
+                // 注意，这里只是让备segment进行加载，并没有切换过去
                 if (!buffer.isNextReady() && (segment.getIdle() < 0.9 * segment.getStep()) && buffer.getThreadRunning().compareAndSet(false, true)) {
                     // 提交任务
                     service.execute(new Runnable() {
@@ -259,25 +261,27 @@ public class SegmentIDGenImpl implements IDGen {
                         }
                     });
                 }
-                // 使用atomicInteger的自增长
+                // 2、使用atomicInteger的自增长
                 long value = segment.getValue().getAndIncrement();
-                // 如果是小于的max_id的话，就可以直接返回了
+                // 3、如果是小于的max_id的话，就可以直接返回了
                 if (value < segment.getMax()) {
                     return new Result(value, Status.SUCCESS);
                 }
             } finally {
                 buffer.rLock().unlock();
             }
-            // 等待 后台线程 更新下一个segment完事
+            // 等待一会(10ms多一点)，主要等后台线程更新下一个segment完事
             waitAndSleep(buffer);
             buffer.wLock().lock();
+            // 走到这里，代表 value >= segment.getMax()，这时候备segment已经在线程池加载了
             try {
-                // 如果下一个segment准备妥了 ，切换pos。其实是切换segment
+                // 3、再获取一遍value(这里类似于DCL，两个线程同时被写锁lock，其中一个需要切换下一个，另一个就不用切换下一个了，直接获取即可)
                 final Segment segment = buffer.getCurrent();
                 long value = segment.getValue().getAndIncrement();
                 if (value < segment.getMax()) {
                     return new Result(value, Status.SUCCESS);
                 }
+                // 4、如果value值已经超过了max，就切换到下一个，然后进入while(true)进入下一轮循环
                 if (buffer.isNextReady()) {
                     buffer.switchPos();
                     buffer.setNextReady(false);
@@ -291,6 +295,7 @@ public class SegmentIDGenImpl implements IDGen {
         }
     }
 
+    // 等10ms多一点
     private void waitAndSleep(SegmentBuffer buffer) {
         int roll = 0;
         while (buffer.getThreadRunning().get()) {

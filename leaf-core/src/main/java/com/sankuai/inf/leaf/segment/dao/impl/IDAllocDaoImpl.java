@@ -36,6 +36,10 @@ public class IDAllocDaoImpl implements IDAllocDao {
         }
     }
 
+    /**
+     * UPDATE leaf_alloc SET max_id = max_id + step WHERE biz_tag = #{tag}
+     * SELECT biz_tag, max_id, step FROM leaf_alloc WHERE biz_tag = #{tag}
+     */
     @Override
     public LeafAlloc updateMaxIdAndGetLeafAlloc(String tag) {
         SqlSession sqlSession = sqlSessionFactory.openSession();
@@ -50,7 +54,7 @@ public class IDAllocDaoImpl implements IDAllocDao {
     }
 
     /**
-     * UPDATE leaf_alloc SET max_id = max_id + step WHERE biz_tag = #{tag}
+     * UPDATE leaf_alloc SET max_id = max_id + #{step} WHERE biz_tag = #{key}
      * SELECT biz_tag, max_id, step FROM leaf_alloc WHERE biz_tag = #{tag}
      */
     @Override
