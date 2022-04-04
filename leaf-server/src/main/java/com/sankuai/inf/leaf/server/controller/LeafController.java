@@ -22,6 +22,11 @@ public class LeafController {
     @Autowired
     private SnowflakeService snowflakeService;
 
+    /**
+     * 缓冲设计很是巧妙，leaf基于服务内存的增长，保证了高性能，基于mysql的行锁，可实现多leaf服务并发修改同一条数据场景下不会出现问题，
+     * 支持集群部署，保证高并发，同时扩展由mysql转向服务本身，保证高扩展性，只能说巧妙，要说它的缺点，就是leaf服务宕机，
+     * 会出现id不连续的情况，某段id丢失，集群部署获取id的时候，同一时刻会出现忽大忽小的情况，但是整体是呈现增长趋势的
+     */
     @RequestMapping(value = "/api/segment/get/{key}")
     public String getSegmentId(@PathVariable("key") String key) {
         return get(key, segmentService.getId(key));

@@ -59,12 +59,18 @@ public class SnowflakeIDGenImpl implements IDGen {
 
     @Override
     public synchronized Result get(String key) {
+        // 获取系统时间戳
         long timestamp = timeGen();
+        // 如果小于上次的话，说明时钟回拨
         if (timestamp < lastTimestamp) {
+            // 计算差值
             long offset = lastTimestamp - timestamp;
+            // 差值小于等于5毫秒
             if (offset <= 5) {
                 try {
+                    // 等待 2倍差值时间
                     wait(offset << 1);
+                    // 重新获取
                     timestamp = timeGen();
                     if (timestamp < lastTimestamp) {
                         return new Result(-1, Status.EXCEPTION);
@@ -77,8 +83,12 @@ public class SnowflakeIDGenImpl implements IDGen {
                 return new Result(-3, Status.EXCEPTION);
             }
         }
+        // 上次时间与这次的一样(上一次更新和这次更新是一个时间，即都在这一毫秒内获取id)
         if (lastTimestamp == timestamp) {
+            // 00001111 11111111
+            // 00010000 00000000
             sequence = (sequence + 1) & sequenceMask;
+            // seq 消耗完的时候，即超了4095个，切换到下一个毫秒
             if (sequence == 0) {
                 //seq 为0的时候表示是下一毫秒时间开始对seq做随机
                 sequence = RANDOM.nextInt(100);

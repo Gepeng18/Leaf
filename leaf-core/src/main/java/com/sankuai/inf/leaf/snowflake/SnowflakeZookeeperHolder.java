@@ -50,19 +50,23 @@ public class SnowflakeZookeeperHolder {
         try {
             CuratorFramework curator = createWithOptions(connectionString, new RetryUntilElapsed(1000, 4), 10000, 6000);
             curator.start();
+            // 检查节点是否存在
             Stat stat = curator.checkExists().forPath(PATH_FOREVER);
             if (stat == null) {
-                //不存在根节点,机器第一次启动,创建/snowflake/ip:port-000000000,并上传数据
+                // 不存在根节点,则是机器第一次启动,创建/snowflake/ip:port-000000000,并上传数据
+                // 创建永久顺序节点
                 zk_AddressNode = createNode(curator);
-                //worker id 默认是0
+                // worker id 默认是0
+                // 将workderId保存到本地文件中
                 updateLocalWorkerID(workerID);
                 //定时上报本机时间给forever节点
                 ScheduledUploadData(curator, zk_AddressNode);
                 return true;
             } else {
                 Map<String, Integer> nodeMap = Maps.newHashMap();//ip:port->00001
-                Map<String, String> realNode = Maps.newHashMap();//ip:port->(ipport-000001)
-                //存在根节点,先检查是否有属于自己的根节点
+                Map<String, String> realNode = Maps.newHashMap();//ip:port->(ip:port-000001)
+                // 存在根节点,先检查是否有属于自己的根节点
+                // 127.0.0.1:1000-000000001
                 List<String> keys = curator.getChildren().forPath(PATH_FOREVER);
                 for (String key : keys) {
                     String[] nodeKey = key.split("-");
@@ -71,14 +75,16 @@ public class SnowflakeZookeeperHolder {
                 }
                 Integer workerid = nodeMap.get(listenAddress);
                 if (workerid != null) {
-                    //有自己的节点,zk_AddressNode=ip:port
+                    // 有自己的节点,zk_AddressNode=ip:port
                     zk_AddressNode = PATH_FOREVER + "/" + realNode.get(listenAddress);
-                    workerID = workerid;//启动worder时使用会使用
+                    // 赋值给workId, 启动worder时使用会使用
+                    workerID = workerid;
                     if (!checkInitTimeStamp(curator, zk_AddressNode)) {
                         throw new CheckLastTimeException("init timestamp check error,forever node timestamp gt this node time");
                     }
                     //准备创建临时节点
                     doService(curator);
+                    // 更新本地文件中的workerId信息
                     updateLocalWorkerID(workerID);
                     LOGGER.info("[Old NODE]find forever node have this endpoint ip-{} port-{} workid-{} childnode and start SUCCESS", ip, port, workerID);
                 } else {
@@ -128,6 +134,9 @@ public class SnowflakeZookeeperHolder {
 
     }
 
+    /**
+     * 会判断一下当前系统时间是否是大于zk这个节点之前上传的那个时间戳，不大于的话说明时钟回拨严重不让启动。
+     */
     private boolean checkInitTimeStamp(CuratorFramework curator, String zk_AddressNode) throws Exception {
         byte[] bytes = curator.getData().forPath(zk_AddressNode);
         Endpoint endPoint = deBuildData(new String(bytes));

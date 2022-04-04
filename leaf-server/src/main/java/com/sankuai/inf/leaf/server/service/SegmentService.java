@@ -26,6 +26,7 @@ public class SegmentService {
 
     public SegmentService() throws SQLException, InitException {
         Properties properties = PropertyFactory.getProperties();
+        // 默认为true，使用号段模式
         boolean flag = Boolean.parseBoolean(properties.getProperty(Constants.LEAF_SEGMENT_ENABLE, "true"));
         if (flag) {
             // Config dataSource
@@ -47,6 +48,7 @@ public class SegmentService {
                 throw new InitException("Segment Service Init Fail");
             }
         } else {
+            // 这玩意只生成0
             idGen = new ZeroIDGen();
             logger.info("Zero ID Gen Service Init Successfully");
         }

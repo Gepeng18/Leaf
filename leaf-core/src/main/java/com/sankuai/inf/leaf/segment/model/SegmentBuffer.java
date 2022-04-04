@@ -51,6 +51,10 @@ public class SegmentBuffer {
         return currentPos;
     }
 
+    /**
+     * 其实就是将pos变成 另个segment上面的索引值
+     * (currentPos + 1) % 2
+     */
     public int nextPos() {
         return (currentPos + 1) % 2;
     }
